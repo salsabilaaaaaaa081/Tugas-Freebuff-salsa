@@ -1,0 +1,42 @@
+# dependensi (bila kelak dipasang)
+node_modules/
+
+# lingkungan virtual & konfigurasi rahasia
+venv/
+.venv/
+env/
+.env
+.env.*
+*.env
+
+# log & artefak lokal
+*.log
+npm-debug.log*
+
+# riwayat chat / arsip pribadi — JANGAN diunggah ke repo publik
+chat-messages.json
+*chat-messages*.json
+*freebuff*chat*
+*riwayat*chat*
+*.chatlog
+conversations*.json
+history*.json
+.chat/
+chats/
+
+# kredensial & token
+credentials*.json
+secrets.*
+*.pem
+*.key
+*.p12
+.netrc
+
+# sistem
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# editor
+.vscode/
+.idea/

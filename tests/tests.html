@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>Uji GanttPro</title>
+<style>
+  body{font-family:"Segoe UI",system-ui,sans-serif;max-width:900px;margin:24px auto;padding:0 16px;color:#0f172a}
+  h1{font-size:20px}
+  .ok{color:#16a34a}.bad{color:#dc2626}
+  li{margin:4px 0;font-size:14px}
+  .err{color:#b91c1c;font-size:12px}
+  #sum{font-weight:700;font-size:16px;margin:12px 0}
+</style>
+</head>
+<body>
+<h1>Uji Unit — Kalender Hari Kerja &amp; CPM</h1>
+<p style="color:#64748b;font-size:13px">Buka file ini langsung di browser untuk memverifikasi perhitungan jadwal tanpa instalasi apa pun.</p>
+<div id="sum"></div>
+<ul id="out"></ul>
+
+<script src="../js/utils.js"></script>
+<script src="../js/store.js"></script>
+<script src="../js/schedule.js"></script>
+<script>
+(function () {
+  'use strict';
+  Store.save = function () {}; /* uji tidak perlu menulis localStorage */
+
+  var results = [];
+  function test(name, fn) {
+    try { fn(); results.push({ name: name, ok: true }); }
+    catch (e) { results.push({ name: name, ok: false, err: e.message }); }
+  }
+  function eq(a, b, msg) {
+    if (a !== b) throw new Error((msg || '') + ' — seharusnya ' + JSON.stringify(b) + ', dapat ' + JSON.stringify(a));
+  }
+  function ok(cond, msg) { if (!cond) throw new Error(msg || 'asersi gagal'); }
+
+  function st(tasks, cal) {
+    return { project: { name: 'uji' }, calendar: cal || { weekendDays: [0, 6], holidays: [] }, tasks: tasks, resources: [] };
+  }
+  function tk(o) {
+    return Object.assign({
+      id: uid('t'), name: 'T', note: '', priority: 'sedang', color: '#2563eb',
+      start: '2026-01-02', duration: 1, parent: null, predecessors: [], resources: []
+    }, o);
+  }
+
+  /* 2026-01-01 = Kamis, 01-02 = Jumat, 01-03 = Sabtu, 01-04 = Minggu, 01-05 = Senin */
+
+  test('format tanggal ISO bulat (roundtrip)', function () {
+    eq(fmtD(parseD('2026-01-05')), '2026-01-05');
+    eq(daysBetween('2026-01-02', '2026-01-06'), 4);
+  });
+
+  test('akhir pekan dikenali (Sab/Min tidak bekerja)', function () {
+    var cal = buildCalendar({ weekendDays: [0, 6], holidays: [] });
+    eq(cal.isWorkingStr('2026-01-02'), true);   /* Jumat */
+    eq(cal.isWorkingStr('2026-01-03'), false);  /* Sabtu */
+    eq(cal.isWorkingStr('2026-01-04'), false);  /* Minggu */
+    eq(cal.isWorkingStr('2026-01-05'), true);   /* Senin */
+  });
+
+  test('durasi hari kerja melewati akhir pekan', function () {
+    var cal = buildCalendar({ weekendDays: [0, 6], holidays: [] });
+    eq(cal.endDateOf('2026-01-02', 3), '2026-01-06'); /* Jum, Sen, Sel */
+  });
+
+  test('hari libur menambah durasi', function () {
+    var cal = buildCalendar({ weekendDays: [0, 6], holidays: [{ date: '2026-01-05', name: 'Uji' }] });
+    eq(cal.endDateOf('2026-01-02', 3), '2026-01-07'); /* Jum, Sel, Rab */
+    eq(cal.isWorkingStr('2026-01-05'), false);
+  });
+
+  test('kustom akhir pekan (Sab bekerja, Sen libur)', function () {
+    var cal = buildCalendar({ weekendDays: [1], holidays: [] });
+    eq(cal.isWorkingStr('2026-01-03'), true);   /* Sabtu jadi kerja */
+    eq(cal.isWorkingStr('2026-01-05'), false);  /* Senin jadi libur */
+    eq(cal.endDateOf('2026-01-02', 4), '2026-01-06'); /* Jum, Sab, Min, Sel — Sen libur */
+  });
+
+  test('indeks hari kerja & inverse (toIndex/fromDate)', function () {
+    var cal = buildCalendar({ weekendDays: [0, 6], holidays: [] });
+    eq(cal.fromDate(cal.toIndex('2026-01-05')), '2026-01-05');
+    eq(cal.toIndex('2026-01-04'), cal.toIndex('2026-01-05')); /* Minggu -> Senin */
+    eq(cal.workdaysInclusive('2026-01-02', '2026-01-06'), 3);
+  });
+
+  test('FS: penerus dimulai setelah pendahulu selesai', function () {
+    var a = tk({ id: 'a', duration: 2 });
+    var b = tk({ id: 'b', duration: 1, predecessors: [{ taskId: 'a', type: 'FS', lag: 0 }] });
+    var s = computeSchedule(st([a, b]));
+    eq(s.res.get('a').endDate, '2026-01-05');
+    eq(s.res.get('b').startDate, '2026-01-06');
+    eq(s.res.get('b').critical, true);
+  });
+
+  test('FS + lag hari kerja', function () {
+    var a = tk({ id: 'a', duration: 2 });
+    var c = tk({ id: 'c', duration: 1, predecessors: [{ taskId: 'a', type: 'FS', lag: 2 }] });
+    var s = computeSchedule(st([a, c]));
+    eq(s.res.get('c').startDate, '2026-01-08'); /* Jum+1, +2 = Rab depan */
+  });
+
+  test('SS: mulai bersamaan + jeda', function () {
+    var a = tk({ id: 'a', duration: 2 });
+    var d = tk({ id: 'd', duration: 2, start: '2026-01-02', predecessors: [{ taskId: 'a', type: 'SS', lag: 1 }] });
+    var s = computeSchedule(st([a, d]));
+    eq(s.res.get('d').startDate, '2026-01-05'); /* satu hari kerja setelah mulai A */
+  });
+
+  test('jalur kritis: belah ketupat A→B/C→D', function () {
+    var A = tk({ id: 'A', duration: 2 });
+    var B = tk({ id: 'B', duration: 3, predecessors: [{ taskId: 'A', type: 'FS', lag: 0 }] });
+    var C = tk({ id: 'C', duration: 1, predecessors: [{ taskId: 'A', type: 'FS', lag: 0 }] });
+    var D = tk({ id: 'D', duration: 2, predecessors: [{ taskId: 'B', type: 'FS', lag: 0 }, { taskId: 'C', type: 'FS', lag: 0 }] });
+    var s = computeSchedule(st([A, B, C, D]));
+    eq(s.res.get('A').slack, 0, 'A');
+    eq(s.res.get('B').slack, 0, 'B');
+    eq(s.res.get('C').slack, 2, 'C');
+    eq(s.res.get('D').slack, 0, 'D');
+    eq(s.stats.critical, 3);
+    eq(s.stats.endDate, '2026-01-12');
+    eq(s.res.get('C').lateStartDate, '2026-01-08');
+  });
+
+  test('sub-tugas: rollup ke induk & induk jadi predecessor', function () {
+    var S = tk({ id: 'S', name: 'Induk', duration: 1 });
+    var L1 = tk({ id: 'L1', duration: 2, parent: 'S' });
+    var L2 = tk({ id: 'L2', duration: 4, parent: 'S' });
+    var X = tk({ id: 'X', duration: 1, predecessors: [{ taskId: 'S', type: 'FS', lag: 0 }] });
+    var s = computeSchedule(st([S, L1, L2, X]));
+    eq(s.res.get('S').summary, true);
+    eq(s.res.get('S').startDate, '2026-01-02');
+    eq(s.res.get('S').endDate, '2026-01-07');   /* anak terakhir (L2) */
+    eq(s.res.get('X').startDate, '2026-01-08'); /* setelah semua daun selesai */
+    ok(s.res.get('L1') && s.res.get('L2'), 'anak tetap terjadwal');
+  });
+
+  test('siklus dependensi ditangani tanpa crash', function () {
+    var a = tk({ id: 'a', predecessors: [{ taskId: 'b', type: 'FS', lag: 0 }] });
+    var b = tk({ id: 'b', predecessors: [{ taskId: 'a', type: 'FS', lag: 0 }] });
+    var s = computeSchedule(st([a, b]));
+    ok(s.warnings.length >= 1, 'harus ada peringatan siklus');
+    ok(isDateStr(s.res.get('a').startDate) && isDateStr(s.res.get('b').startDate), 'kedua tugas tetap terjadwal');
+    ok(s.res.get('a').slack >= 0 && s.res.get('b').slack >= 0, 'slack tidak negatif');
+  });
+
+  test('dependensi hierarki (anak → induk) diabaikan', function () {
+    var P = tk({ id: 'P', duration: 5 });
+    var C = tk({ id: 'C', parent: 'P', duration: 2, predecessors: [{ taskId: 'P', type: 'FS', lag: 0 }] });
+    var s = computeSchedule(st([P, C]));
+    ok(s.warnings.length >= 1, 'ada peringatan');
+    ok(isDateStr(s.res.get('C').startDate), 'anak tetap terjadwal');
+  });
+
+  test('tanggal mulai manual menjadi batas terawal', function () {
+    var a = tk({ id: 'a', duration: 1, start: '2026-01-02' });
+    var b = tk({ id: 'b', duration: 1, start: '2026-01-12', predecessors: [{ taskId: 'a', type: 'FS', lag: 0 }] });
+    var s = computeSchedule(st([a, b]));
+    eq(s.res.get('b').startDate, '2026-01-12'); /* bukan 05 Jan — karena mulai manual lebih lambat */
+  });
+
+  test('statistik & estimasi biaya', function () {
+    var state = st([tk({ id: 'a', duration: 2, resources: ['r1'] })]);
+    state.resources = [{ id: 'r1', name: 'X', email: 'x@y.id', role: 'Dev', salary: 2200000 }];
+    eq(estimateCost(state), 200000); /* 2.200.000 / 22 x 2 */
+    var s = computeSchedule(state);
+    eq(s.stats.total, 1);
+    eq(s.stats.leaves, 1);
+    eq(s.stats.workdays, 2);
+  });
+
+  test('alokasi anggota per tugas', function () {
+    var state = st([
+      tk({ id: 'a', duration: 3, resources: ['r1'] }),
+      tk({ id: 'b', duration: 2, resources: ['r1', 'r2'] })
+    ]);
+    state.resources = [
+      { id: 'r1', name: 'A', email: 'a@a.id', role: 'Dev', salary: 2200000 },
+      { id: 'r2', name: 'B', email: 'b@b.id', role: 'QA', salary: 4400000 }
+    ];
+    var m = resourceAllocations(state);
+    eq(m.get('r1').tasks.length, 2);
+    eq(m.get('r1').days, 5);
+    eq(m.get('r2').tasks.length, 1);
+  });
+
+  test('Store: hapus tugas turunan membersihkan relasi', function () {
+    var s = Store.seed();
+    Store.state = s;
+    var parent = s.tasks.find(function (t) { return t.id === 'p1'; });
+    ok(parent, 'seed punya p1');
+    Store.removeTask('p1');
+    ok(!Store.taskById('p1'), 'induk terhapus');
+    ok(!Store.taskById('t1'), 'anak terhapus');
+    var adaRelasi = s.tasks.some(function (t) {
+      return t.predecessors.some(function (p) { return p.taskId === 'p1' || p.taskId === 't1'; });
+    });
+    ok(!adaRelasi, 'relasi ke tugas terhapus ikut dibersihkan');
+  });
+
+  test('seed valid: prioritas, warna, parent ada', function () {
+    var s = Store.seed();
+    ok(s.tasks.length >= 10, 'minimal 10 tugas contoh');
+    var ids = {};
+    s.tasks.forEach(function (t) { ids[t.id] = true; });
+    s.tasks.forEach(function (t) {
+      ok(!!PRIORITY_META[t.priority], 'prioritas valid: ' + t.priority);
+      ok(!!t.color, 'punya warna');
+      ok(!t.parent || ids[t.parent], 'parent valid');
+    });
+    var sched = computeSchedule(s);
+    eq(sched.warnings.length, 0, 'seed bebas peringatan');
+    ok(sched.stats.critical > 0, 'punya jalur kritis');
+  });
+
+  /* ---- render ---- */
+  var out = document.getElementById('out');
+  var pass = 0;
+  results.forEach(function (r) {
+    var li = document.createElement('li');
+    if (r.ok) { pass++; li.className = 'ok'; li.textContent = '✓ ' + r.name; }
+    else { li.className = 'bad'; li.innerHTML = '✗ ' + r.name + '<div class="err">' + r.err + '</div>'; }
+    out.appendChild(li);
+  });
+  var sum = document.getElementById('sum');
+  sum.className = pass === results.length ? 'ok' : 'bad';
+  sum.textContent = pass + ' / ' + results.length + ' uji lulus';
+})();
+</script>
+</body>
+</html>

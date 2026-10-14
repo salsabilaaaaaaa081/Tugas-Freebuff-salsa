@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GanttPro — Manajemen Proyek Gantt Chart</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand"><span class="brand-mark">&#9638;</span> GanttPro</div>
+  <input id="projectName" class="project-name" title="Nama proyek" maxlength="60" aria-label="Nama proyek">
+  <div class="topbar-actions">
+    <button class="btn ghost sm" data-action="export">Ekspor JSON</button>
+    <label class="btn ghost sm" for="importFile">Impor JSON</label>
+    <input type="file" id="importFile" accept="application/json,.json" hidden>
+    <button class="btn ghost sm" data-action="seed">Muat Contoh</button>
+    <button class="btn danger-ghost sm" data-action="reset">Reset</button>
+  </div>
+</header>
+
+<nav class="tabs" id="tabs" aria-label="Navigasi utama">
+  <button class="tab active" data-action="tab" data-tab="gantt">Gantt Chart</button>
+  <button class="tab" data-action="tab" data-tab="team">Tim &amp; Alokasi</button>
+  <button class="tab" data-action="tab" data-tab="calendar">Kalender Proyek</button>
+  <button class="tab" data-action="tab" data-tab="analysis">Analisis</button>
+</nav>
+
+<main>
+
+  <!-- ===================== TAB GANTT ===================== -->
+  <section id="tab-gantt" class="tab-panel">
+    <div class="toolbar">
+      <button class="btn primary" data-action="task-new">+ Tugas Baru</button>
+      <select id="filterPrio" class="input sm" aria-label="Filter prioritas">
+        <option value="all">Semua prioritas</option>
+        <option value="kritis">Prioritas kritis</option>
+        <option value="tinggi">Prioritas tinggi</option>
+        <option value="sedang">Prioritas sedang</option>
+        <option value="rendah">Prioritas rendah</option>
+      </select>
+      <input id="searchInput" class="input sm" placeholder="Cari tugas…" aria-label="Cari tugas">
+      <div class="spacer"></div>
+      <label class="toggle"><input type="checkbox" id="criticalToggle" checked> Sorot jalur kritis</label>
+      <button class="btn ghost sm" data-action="zoom-out" title="Perkecil">&#8722;</button>
+      <span id="zoomLabel" class="muted zoom-label">30 px/hari</span>
+      <button class="btn ghost sm" data-action="zoom-in" title="Perbesar">+</button>
+    </div>
+    <div class="stats" id="ganttStats"></div>
+    <div class="gantt" id="ganttContainer"></div>
+    <p class="legend muted">
+      <b>FS</b> = Finish-to-Start (tugas mulai setelah pendahulunya selesai) &middot;
+      <b>SS</b> = Start-to-Start (mulai bersamaan) &middot; angka = jeda hari kerja.
+      Kolom abu = akhir pekan, kolom kuning = hari libur.
+    </p>
+  </section>
+
+  <!-- ===================== TAB TIM ===================== -->
+  <section id="tab-team" class="tab-panel" hidden>
+    <div class="toolbar">
+      <button class="btn primary" data-action="res-new">+ Anggota Tim</button>
+      <div class="spacer"></div>
+      <span class="muted">Alokasi anggota dilakukan lewat formulir tugas (ikon &#9998; pada Gantt).</span>
+    </div>
+    <div class="stats" id="teamStats"></div>
+    <div class="card" id="resTable"></div>
+  </section>
+
+  <!-- ===================== TAB KALENDER ===================== -->
+  <section id="tab-calendar" class="tab-panel" hidden>
+    <div class="cols2">
+      <div class="card">
+        <h3>Akhir Pekan</h3>
+        <p class="hint">Hari yang dicentang dianggap tidak bekerja. Durasi hari kerja, jadwal, jalur kritis, dan PERT semua mengikuti pengaturan ini.</p>
+        <div class="weekend-picks" id="weekendPicks"></div>
+        <div class="hint" id="calSummary"></div>
+      </div>
+      <div class="card">
+        <h3>Hari Libur Khusus</h3>
+        <p class="hint">Tanggal merah tambahan yang dikecualikan dari hari kerja.</p>
+        <form id="holidayForm" class="inline-form">
+          <input type="date" id="hol_date" min="2000-01-01" required aria-label="Tanggal hari libur">
+          <input type="text" id="hol_name" placeholder="Nama hari libur" required maxlength="60" aria-label="Nama hari libur">
+          <button class="btn primary sm" type="submit">Tambah</button>
+        </form>
+        <div id="holidayList"></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Pratinjau Kalender Bulan Ini</h3>
+      <div class="cal-preview" id="calPreview"></div>
+    </div>
+  </section>
+
+  <!-- ===================== TAB ANALISIS ===================== -->
+  <section id="tab-analysis" class="tab-panel" hidden>
+    <div class="stats" id="analysisStats"></div>
+    <div id="analysisWarn"></div>
+    <div class="card">
+      <div class="card-head">
+        <h3>Jalur Kritis (Critical Path)</h3>
+        <button class="btn ghost sm" data-action="show-gantt-critical">Sorot di Gantt</button>
+      </div>
+      <div id="criticalTable"></div>
+    </div>
+    <div class="card">
+      <div class="card-head">
+        <h3>Diagram PERT</h3>
+        <span class="muted">Kotak: atas = nama &amp; durasi, ES/D/EF, lalu LS/Slack/LF (dalam hari kerja).</span>
+      </div>
+      <div class="pert-wrap" id="pertContainer"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ===================== MODAL TUGAS ===================== -->
+<div class="modal-backdrop" id="taskModal" hidden>
+  <form id="taskForm" class="modal" novalidate>
+    <div class="modal-head">
+      <h2 id="taskModalTitle">Tambah Tugas</h2>
+      <button type="button" class="icon-btn" data-close title="Tutup">&#10005;</button>
+    </div>
+
+    <div class="field">
+      <label for="tf_name">Nama tugas *</label>
+      <input id="tf_name" maxlength="120" required placeholder="mis. Perancangan Antarmuka">
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label for="tf_parent">Tugas induk</label>
+        <select id="tf_parent"></select>
+        <span class="hint">Kosong = tugas utama. Memilih induk membuatnya menjadi baris ringkasan.</span>
+      </div>
+      <div class="field">
+        <label for="tf_priority">Prioritas</label>
+        <select id="tf_priority">
+          <option value="kritis">Kritis</option>
+          <option value="tinggi">Tinggi</option>
+          <option value="sedang">Sedang</option>
+          <option value="rendah">Rendah</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tf_start">Tanggal mulai *</label>
+        <input type="date" id="tf_start" min="2000-01-01" required>
+        <span class="hint">Batas terawal; jadwal efektif bisa bergeser mengikuti predecessor.</span>
+      </div>
+      <div class="field">
+        <label for="tf_duration">Durasi (hari kerja) *</label>
+        <input type="number" id="tf_duration" min="1" max="1000" step="1" required>
+        <span class="hint" id="tf_endhint">—</span>
+      </div>
+      <div class="field">
+        <label>Warna indikator</label>
+        <div class="swatches" id="tf_colors"></div>
+        <input type="color" id="tf_color" value="#2563eb" title="Warna kustom">
+      </div>
+      <div class="field">
+        <label for="tf_note">Deskripsi</label>
+        <textarea id="tf_note" rows="2" maxlength="500" placeholder="Catatan singkat…"></textarea>
+      </div>
+    </div>
+
+    <fieldset class="fs">
+      <legend>Predecessor (hubungan antar tugas)</legend>
+      <div id="tf_preds"></div>
+      <button type="button" class="btn ghost sm" data-action="pred-add">+ Tambah predecessor</button>
+      <p class="hint">FS = mulai setelah pendahulu selesai &middot; SS = mulai bersamaan pendahulu &middot; Jeda dalam hari kerja.</p>
+    </fieldset>
+
+    <fieldset class="fs">
+      <legend>Alokasi anggota tim</legend>
+      <div id="tf_resources" class="checks"></div>
+    </fieldset>
+
+    <div class="preview" id="tf_preview"></div>
+
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Batal</button>
+      <button type="submit" class="btn primary">Simpan Tugas</button>
+    </div>
+  </form>
+</div>
+
+<!-- ===================== MODAL ANGGOTA ===================== -->
+<div class="modal-backdrop" id="resModal" hidden>
+  <form id="resForm" class="modal" novalidate>
+    <div class="modal-head">
+      <h2 id="resModalTitle">Tambah Anggota</h2>
+      <button type="button" class="icon-btn" data-close title="Tutup">&#10005;</button>
+    </div>
+    <input type="hidden" id="rf_id">
+    <div class="grid2">
+      <div class="field">
+        <label for="rf_name">Nama lengkap *</label>
+        <input id="rf_name" maxlength="80" required placeholder="mis. Andi Prasetyo">
+      </div>
+      <div class="field">
+        <label for="rf_email">Email *</label>
+        <input type="email" id="rf_email" maxlength="120" required placeholder="nama@contoh.id">
+      </div>
+      <div class="field">
+        <label for="rf_role">Peran</label>
+        <input id="rf_role" list="roleList" maxlength="60" placeholder="mis. Frontend Developer">
+        <datalist id="roleList">
+          <option value="Project Manager"></option>
+          <option value="Frontend Developer"></option>
+          <option value="Backend Developer"></option>
+          <option value="UI/UX Designer"></option>
+          <option value="QA Engineer"></option>
+          <option value="DevOps Engineer"></option>
+          <option value="Business Analyst"></option>
+        </datalist>
+      </div>
+      <div class="field">
+        <label for="rf_salary">Gaji / bulan (Rp) *</label>
+        <input type="number" id="rf_salary" min="0" step="100000" required placeholder="12000000">
+        <span class="hint">Dipakai untuk estimasi biaya tugas (asumsi 22 hari kerja/bulan).</span>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn ghost" data-close>Batal</button>
+      <button type="submit" class="btn primary">Simpan Anggota</button>
+    </div>
+  </form>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite"></div>
+
+<script src="js/utils.js"></script>
+<script src="js/store.js"></script>
+<script src="js/schedule.js"></script>
+<script src="js/gantt.js"></script>
+<script src="js/pert.js"></script>
+<script src="js/tasks.js"></script>
+<script src="js/resources.js"></script>
+<script src="js/calendar.js"></script>
+<script src="js/analysis.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>

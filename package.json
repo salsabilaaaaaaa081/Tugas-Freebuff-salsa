@@ -1,0 +1,9 @@
+{
+  "name": "ganttpro",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GanttPro — aplikasi manajemen proyek berbasis Gantt Chart (vanilla JS, tanpa build step)",
+  "scripts": {
+    "dev": "node server.js"
+  }
+}
